@@ -1,1 +1,22 @@
 raylib/
+# Zig
+.zig-cache/
+zig-out/
+build/
+build-*/
+
+# Zig package manager
+.gyro/
+deps/
+
+# Executables
+*.exe
+*.out
+
+# Build artifacts
+*.o
+*.obj
+
+# Editor files
+*.swp
+*~

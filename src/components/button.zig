@@ -7,6 +7,7 @@ pub const Tool = enum {
     Text,
     Rectangle,
     Erase,
+    Normal,
 };
 
 pub const ToolButton = struct {

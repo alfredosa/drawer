@@ -2,7 +2,7 @@ const std = @import("std");
 const ray = @cImport({
     @cInclude("raylib.h");
 });
-const drawer = @import("drawer/drawer.zig");
+const d = @import("drawer/drawer.zig");
 
 const AppState = enum {
     Drawer,
@@ -18,12 +18,19 @@ pub fn main() !void {
 
     const currentState: AppState = .Drawer;
 
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var drawer = try d.Drawer.init(allocator);
+    defer drawer.deinit(allocator);
+
     while (!ray.WindowShouldClose()) {
-        drawer.updateDrawer();
+        drawer.update();
         ray.BeginDrawing();
         ray.ClearBackground(ray.RAYWHITE);
         switch (currentState) {
-            .Drawer => drawer.drawDrawer(),
+            .Drawer => drawer.draw(),
             .Menu => unreachable,
         }
         ray.EndDrawing();
