@@ -4,6 +4,7 @@ const ray = @cImport({
     @cInclude("raylib.h");
 });
 const text = @import("text.zig");
+const canvas = @import("canvas.zig");
 
 const ButtonDimensions = struct {
     width: f32 = 40, // Default :)
@@ -24,6 +25,7 @@ pub const Drawer = struct {
     currentCursor: c_int,
     iconTextures: [4]ray.Texture2D,
     text: text.Text,
+    canvas: canvas.Canvas,
 
     const Self = @This();
 
@@ -37,13 +39,14 @@ pub const Drawer = struct {
         iconTextures[3] = ray.LoadTexture("assets/drawing/terminal.png");
 
         const t = try text.Text.init();
-
+        const c = canvas.Canvas.init(allocator);
         return Self{
             .currentTool = .Normal,
             .buttons = buttons,
             .currentCursor = ray.MOUSE_CURSOR_DEFAULT,
             .iconTextures = iconTextures,
             .text = t,
+            .canvas = c,
         };
     }
 
@@ -53,6 +56,7 @@ pub const Drawer = struct {
             ray.UnloadTexture(texture);
         }
         self.text.deinit();
+        self.canvas.deinit();
     }
 
     fn updateCursor(self: *Self) void {
@@ -79,7 +83,7 @@ pub const Drawer = struct {
         });
     }
 
-    pub fn draw(self: *const Self) void {
+    pub fn draw(self: *Self) void {
         const colors = Colors{};
 
         ray.DrawRectangle(-1, 0, ray.GetScreenWidth(), 60, ray.LIGHTGRAY);
@@ -105,6 +109,7 @@ pub const Drawer = struct {
             .Erase => {},
             .Normal => {},
         }
+        self.canvas.draw();
         self.draw_current_mode();
     }
 
@@ -141,11 +146,43 @@ pub const Drawer = struct {
         }
 
         if (ray.IsMouseButtonPressed(ray.MOUSE_BUTTON_LEFT)) {
+            var button_clicked = false;
+
+            // Check if a button was clicked
             for (self.buttons) |button| {
                 if (button.isMouseOverButton()) {
                     self.currentTool = button.tool;
                     button.action();
+                    button_clicked = true;
                     break;
+                }
+            }
+
+            // If no button was clicked, perform the action of the current tool
+            if (!button_clicked) {
+                switch (self.currentTool) {
+                    .Text => {
+                        const tb = self.text.createTextBox(200, 100) catch |err| {
+                            std.debug.print("Failed to create a box: {}\n", .{err});
+                            return;
+                        };
+
+                        self.canvas.addItem(.{ .TextBox = tb }) catch |err| {
+                            std.debug.print("Failed to add a box to the list: {}\n", .{err});
+                            return;
+                        };
+                        std.debug.print("Canvas Items {d}", .{self.canvas.items.items.len});
+                        self.currentTool = .Normal;
+                    },
+                    .Rectangle => {
+                        // Implement rectangle drawing logic here
+                    },
+                    .Erase => {
+                        // Implement erasing logic here
+                    },
+                    .Normal => {
+                        // Implement normal mode logic here, if any
+                    },
                 }
             }
         }
