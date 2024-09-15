@@ -3,9 +3,10 @@ const btns = @import("../components/button.zig");
 const ray = @cImport({
     @cInclude("raylib.h");
 });
+const text = @import("text.zig");
 
 const ButtonDimensions = struct {
-    width: f32 = 120, // Default :)
+    width: f32 = 40, // Default :)
     height: f32 = 40,
 };
 
@@ -21,20 +22,37 @@ pub const Drawer = struct {
     currentTool: btns.Tool,
     buttons: []const btns.ToolButton,
     currentCursor: c_int,
+    iconTextures: [4]ray.Texture2D,
+    text: text.Text,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) !Self {
         const buttons = try createButtons(allocator);
+
+        var iconTextures: [4]ray.Texture2D = undefined;
+        iconTextures[0] = ray.LoadTexture("assets/drawing/text-height.png");
+        iconTextures[1] = ray.LoadTexture("assets/drawing/shapes.png");
+        iconTextures[2] = ray.LoadTexture("assets/drawing/eraser.png");
+        iconTextures[3] = ray.LoadTexture("assets/drawing/terminal.png");
+
+        const t = try text.Text.init();
+
         return Self{
             .currentTool = .Normal,
             .buttons = buttons,
             .currentCursor = ray.MOUSE_CURSOR_DEFAULT,
+            .iconTextures = iconTextures,
+            .text = t,
         };
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         allocator.free(self.buttons);
+        for (self.iconTextures) |texture| {
+            ray.UnloadTexture(texture);
+        }
+        self.text.deinit();
     }
 
     fn updateCursor(self: *Self) void {
@@ -54,36 +72,67 @@ pub const Drawer = struct {
     fn createButtons(allocator: std.mem.Allocator) ![]const btns.ToolButton {
         const button_dims = ButtonDimensions{};
         return try allocator.dupe(btns.ToolButton, &[_]btns.ToolButton{
-            .{ .rect = .{ .x = 10, .y = 10, .width = button_dims.width, .height = button_dims.height }, .text = "Text", .tool = .Text, .action = &btns.printClicked },
-            .{ .rect = .{ .x = 140, .y = 10, .width = button_dims.width, .height = button_dims.height }, .text = "Rectangle", .tool = .Rectangle, .action = &btns.printClicked },
-            .{ .rect = .{ .x = 270, .y = 10, .width = button_dims.width, .height = button_dims.height }, .text = "Erase", .tool = .Erase, .action = &btns.printClicked },
+            .{ .rect = .{ .x = 10, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Text, .action = &btns.printClicked },
+            .{ .rect = .{ .x = 70, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Rectangle, .action = &btns.printClicked },
+            .{ .rect = .{ .x = 130, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Erase, .action = &btns.printClicked },
+            .{ .rect = .{ .x = 190, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Normal, .action = &btns.printClicked },
         });
     }
 
     pub fn draw(self: *const Self) void {
         const colors = Colors{};
-        const button_dims = ButtonDimensions{};
 
         ray.DrawRectangle(-1, 0, ray.GetScreenWidth(), 60, ray.LIGHTGRAY);
         ray.DrawRectangleLines(-1, 0, ray.GetScreenWidth(), 60, ray.BLACK);
 
-        for (self.buttons) |button| {
+        for (self.buttons, 0..) |button, i| {
             const isSelected = button.tool == self.currentTool;
             const isHovered = button.isMouseOverButton();
             const buttonColor = if (isSelected) colors.selected else if (isHovered) colors.hovered else colors.normal;
-            const textColor = if (isSelected) colors.text_selected else colors.text_normal;
 
             ray.DrawRectangleRec(button.rect, buttonColor);
             ray.DrawRectangleLinesEx(button.rect, 2, ray.BLACK);
-            ray.DrawText(button.text.ptr, @as(c_int, @intFromFloat(button.rect.x + (button_dims.width - @as(f32, @floatFromInt(ray.MeasureText(button.text.ptr, 20)))) / 2)), @as(c_int, @intFromFloat(button.rect.y + 10)), 20, textColor);
+
+            // Draw the icon
+            const iconColor = if (isSelected) ray.WHITE else ray.BLACK;
+            const scale = @min((button.rect.width - 10) / @as(f32, @floatFromInt(self.iconTextures[i].width)), (button.rect.height - 10) / @as(f32, @floatFromInt(self.iconTextures[i].height)));
+            ray.DrawTextureEx(self.iconTextures[i], .{ .x = button.rect.x + (button.rect.width - @as(f32, @floatFromInt(self.iconTextures[i].width)) * scale) / 2, .y = button.rect.y + (button.rect.height - @as(f32, @floatFromInt(self.iconTextures[i].height)) * scale) / 2 }, 0, scale, iconColor);
         }
 
         switch (self.currentTool) {
-            .Text => ray.DrawText("Text Tool Selected", 10, 100, 20, ray.BLACK),
-            .Rectangle => ray.DrawText("Rectangle Tool Selected", 10, 100, 20, ray.BLACK),
-            .Erase => ray.DrawText("Erase Tool Selected", 10, 100, 20, ray.BLACK),
-            .Normal => ray.DrawText("This is noraml mode ;)", 10, 100, 20, ray.BLACK),
+            .Text => self.text.previewTextBox(),
+            .Rectangle => {},
+            .Erase => {},
+            .Normal => {},
         }
+        self.draw_current_mode();
+    }
+
+    fn draw_current_mode(self: *const Self) void {
+        // TODO: make colors a setting
+        const screen_height = ray.GetScreenHeight();
+        const box_width: c_int = 120;
+        const box_height: c_int = 30;
+        const padding: c_int = 10;
+
+        const box_x = padding;
+        const box_y = screen_height - box_height - padding;
+
+        // Draw the box
+        ray.DrawRectangle(box_x, box_y, box_width, box_height, ray.BLACK);
+
+        // Draw the mode text
+        const mode_text = switch (self.currentTool) {
+            .Text => "TEXTING",
+            .Rectangle => "SHAPING",
+            .Erase => "ERASING",
+            .Normal => "NORMAL",
+        };
+
+        const text_x = box_x + @divFloor((box_width - ray.MeasureText(mode_text, 20)), 2);
+        const text_y = box_y + @divFloor((box_height - 20), 2);
+
+        ray.DrawTextEx(self.text.font, mode_text, .{ .x = @floatFromInt(text_x), .y = @floatFromInt(text_y) }, 20, 1, ray.WHITE);
     }
 
     pub fn update(self: *Self) void {
