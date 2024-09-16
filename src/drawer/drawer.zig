@@ -5,11 +5,7 @@ const ray = @cImport({
 });
 const text = @import("text.zig");
 const canvas = @import("canvas.zig");
-
-const ButtonDimensions = struct {
-    width: f32 = 40, // Default :)
-    height: f32 = 40,
-};
+const shapes = @import("shapes.zig");
 
 const Colors = struct {
     selected: ray.Color = ray.SKYBLUE,
@@ -26,11 +22,12 @@ pub const Drawer = struct {
     iconTextures: [4]ray.Texture2D,
     text: text.Text,
     canvas: canvas.Canvas,
+    shapes: shapes.Shapes,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) !Self {
-        const buttons = try createButtons(allocator);
+        const buttons = try btns.createButtons(allocator);
 
         var iconTextures: [4]ray.Texture2D = undefined;
         iconTextures[0] = ray.LoadTexture("assets/drawing/text-height.png");
@@ -40,6 +37,8 @@ pub const Drawer = struct {
 
         const t = try text.Text.init();
         const c = canvas.Canvas.init(allocator);
+        const s = try shapes.Shapes.init();
+
         return Self{
             .currentTool = .Normal,
             .buttons = buttons,
@@ -47,6 +46,7 @@ pub const Drawer = struct {
             .iconTextures = iconTextures,
             .text = t,
             .canvas = c,
+            .shapes = s,
         };
     }
 
@@ -62,7 +62,7 @@ pub const Drawer = struct {
     fn updateCursor(self: *Self) void {
         const newCursor = switch (self.currentTool) {
             .Text => ray.MOUSE_CURSOR_IBEAM,
-            .Rectangle => ray.MOUSE_CURSOR_CROSSHAIR,
+            .Shapes => ray.MOUSE_CURSOR_CROSSHAIR,
             .Erase => ray.MOUSE_CURSOR_POINTING_HAND,
             .Normal => ray.MOUSE_CURSOR_DEFAULT,
         };
@@ -71,16 +71,6 @@ pub const Drawer = struct {
             self.currentCursor = newCursor;
             ray.SetMouseCursor(self.currentCursor);
         }
-    }
-
-    fn createButtons(allocator: std.mem.Allocator) ![]const btns.ToolButton {
-        const button_dims = ButtonDimensions{};
-        return try allocator.dupe(btns.ToolButton, &[_]btns.ToolButton{
-            .{ .rect = .{ .x = 10, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Text, .action = &btns.printClicked },
-            .{ .rect = .{ .x = 70, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Rectangle, .action = &btns.printClicked },
-            .{ .rect = .{ .x = 130, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Erase, .action = &btns.printClicked },
-            .{ .rect = .{ .x = 190, .y = 5, .width = button_dims.width, .height = button_dims.height }, .text = "", .tool = .Normal, .action = &btns.printClicked },
-        });
     }
 
     pub fn draw(self: *Self) void {
@@ -105,11 +95,12 @@ pub const Drawer = struct {
 
         switch (self.currentTool) {
             .Text => self.text.previewTextBox(),
-            .Rectangle => {},
+            .Shapes => {},
             .Erase => {},
             .Normal => {},
         }
         self.canvas.draw();
+        self.shapes.draw();
         self.draw_current_mode();
     }
 
@@ -129,7 +120,7 @@ pub const Drawer = struct {
         // Draw the mode text
         const mode_text = switch (self.currentTool) {
             .Text => "TEXTING",
-            .Rectangle => "SHAPING",
+            .Shapes => "SHAPING",
             .Erase => "ERASING",
             .Normal => "NORMAL",
         };
@@ -140,29 +131,49 @@ pub const Drawer = struct {
         ray.DrawTextEx(self.text.font, mode_text, .{ .x = @floatFromInt(text_x), .y = @floatFromInt(text_y) }, 20, 1, ray.WHITE);
     }
 
-    pub fn update(self: *Self) void {
-        if (ray.IsKeyDown(ray.KEY_N)) {
+    pub fn update_keybinds(self: *Self) void {
+        if (ray.IsKeyPressed(ray.KEY_E)) {
+            self.currentTool = .Erase;
+        } else if (ray.IsKeyPressed(ray.KEY_N)) {
             self.currentTool = .Normal;
+        } else if (ray.IsKeyPressed(ray.KEY_S)) {
+            self.currentTool = .Shapes;
+            self.shapes.start_selecting();
+        } else if (ray.IsKeyPressed(ray.KEY_T)) {
+            self.currentTool = .Text;
+        }
+    }
+
+    pub fn update(self: *Self) void {
+        self.update_keybinds();
+
+        var button_clicked = false;
+
+        // Check if a button was clicked
+        for (self.buttons) |button| {
+            if (button.isMouseOverButton() and ray.IsMouseButtonPressed(ray.MOUSE_BUTTON_LEFT)) {
+                self.currentTool = button.tool;
+                switch (button.tool) {
+                    .Text => std.debug.print("Text clicked", .{}),
+                    .Shapes => self.shapes.start_selecting(),
+                    .Erase => std.debug.print("Erase clicked", .{}),
+                    .Normal => std.debug.print("Normal clicked", .{}),
+                }
+                button_clicked = true;
+                break;
+            }
         }
 
-        if (ray.IsMouseButtonPressed(ray.MOUSE_BUTTON_LEFT)) {
-            var button_clicked = false;
-
-            // Check if a button was clicked
-            for (self.buttons) |button| {
-                if (button.isMouseOverButton()) {
-                    self.currentTool = button.tool;
-                    button.action();
-                    button_clicked = true;
-                    break;
-                }
-            }
-
-            // If no button was clicked, perform the action of the current tool
-            if (!button_clicked) {
-                switch (self.currentTool) {
-                    .Text => {
-                        const tb = self.text.createTextBox(200, 100) catch |err| {
+        // If no button was clicked, handle tool actions
+        if (!button_clicked) {
+            switch (self.currentTool) {
+                .Text => {
+                    if (ray.IsMouseButtonPressed(ray.MOUSE_BUTTON_LEFT)) {
+                        // Start measuring the text box
+                        self.text.startMeasuring(ray.GetMousePosition());
+                    } else if (ray.IsMouseButtonReleased(ray.MOUSE_BUTTON_LEFT)) {
+                        // Finalize the text box and add it to the canvas
+                        const tb = self.text.finalizeTextBox() catch |err| {
                             std.debug.print("Failed to create a box: {}\n", .{err});
                             return;
                         };
@@ -173,17 +184,30 @@ pub const Drawer = struct {
                         };
                         std.debug.print("Canvas Items {d}", .{self.canvas.items.items.len});
                         self.currentTool = .Normal;
-                    },
-                    .Rectangle => {
-                        // Implement rectangle drawing logic here
-                    },
-                    .Erase => {
-                        // Implement erasing logic here
-                    },
-                    .Normal => {
-                        // Implement normal mode logic here, if any
-                    },
-                }
+                    } else if (ray.IsMouseButtonDown(ray.MOUSE_BUTTON_LEFT)) {
+                        // Update the dimensions of the text box being measured
+                        self.text.updateMeasurement(ray.GetMousePosition());
+                    }
+                },
+                .Shapes => {
+                    // Implement similar logic for rectangle drawing
+                    if (ray.IsMouseButtonPressed(ray.MOUSE_BUTTON_LEFT)) {
+                        // self.shapes.start_selecting();
+                    } else if (ray.IsMouseButtonReleased(ray.MOUSE_BUTTON_LEFT)) {
+                        // Finalize rectangle and add to canvas
+                    } else if (ray.IsMouseButtonDown(ray.MOUSE_BUTTON_LEFT)) {
+                        // Update rectangle dimensions
+
+                    }
+                },
+                .Erase => {
+                    if (ray.IsMouseButtonDown(ray.MOUSE_BUTTON_LEFT)) {
+                        // Perform erasing while the button is held down
+                    }
+                },
+                .Normal => {
+                    // Implement normal mode logic here, if any
+                },
             }
         }
         self.updateCursor();
